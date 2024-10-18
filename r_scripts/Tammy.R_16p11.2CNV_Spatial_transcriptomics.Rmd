@@ -1,0 +1,167 @@
+---
+title: "16p11.2 CNV project"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
+Import necessary libraries
+```{r}
+library(tidyverse)
+
+
+```
+
+Importing necesary CSV files
+```{r}
+#Setting working directory
+setwd("/Users/tammyray/Desktop/Aaron_16p_Imaging_Transcriptomics/CSV_data_sheets/transcriptomic_datasheets")
+#Importing trancriptomic datasdets
+Talkowski2014 <- read.csv("Talkowski_2014_TableS3_Human_Del.csv")
+Urresti2021_3M_organoid <- read.csv("Urresti-2021_DEG-3M-cortical-organoid.csv")
+Roth2020 <-  read.csv("Roth_2020_DEG-hIPSC-neural-endodermMesoderm.csv")
+#Importing file containing 16p11.2 gene list
+chr16p11.2_gene_list_Kusenda2015 <-  read.csv("Kusenda_2015_TableS1_16p11.2_gene_list.csv")
+#Creating a vector of all genes in the 16p11.2 chromosomal region
+sixteenP11.2_genes <- chr16p11.2_gene_list_Kusenda2015$Gene.symbol
+
+```
+
+Modifying dataframes, such that they have the same column names, in order to combine them
+
+1. Uresti 2021 cortical organoids data
+```{r}
+Urresti2021_3M_organoid_tidy <- Urresti2021_3M_organoid %>%
+  #remove columns that i do not need
+  select(-c("Gene.Biotype", "log2.FC..DUP.vs.DEL", "P.value..DUP.vs.DEL", "FDR.adjusted.P.value..DUP.vs.DEL", "log2.FC..DUP.vs.CTL",
+            "P.value..DUP.vs.CTL", "FDR.adjusted.P.value..DUP.vs.CTL", "FDR.adjusted.P.value..DEL.vs.CTL")) %>%
+  #rename columns to the standardized names I decided on
+  rename("gene_name" = "HGNC.Symbol",
+         "log2_fold_change" = "log2.FC..DEL.vs.CTL",
+         "p_value" = "P.value..DEL.vs.CTL",
+         "gene_description" = "Description", 
+         "ENSEMBL_ID" = "ENSEMBL.ID") %>%
+  #add a column for the data source
+  mutate("data_source" = "Urresti et al. 2021", "Present.in.the.16p11.2.Region" = "") %>%
+  #reorder columns so that the ensemble_ID column, which not all dataframes will have, is at the end
+  relocate("ENSEMBL_ID", .after = "data_source")
+
+```
+
+2. Roth 2020 data
+```{r}
+Roth2020_tidy <- Roth2020 %>%
+  # remove columns that I do not need
+  select(-c("SFARI.Gene.Score", "SFARI.Gene.Score.Category", "https...gene.sfari.org.about.gene.scoring.criteria.")) %>%
+  #rename columns to the standardized names I decided on
+  rename("gene_name" = "X16p11.2.DE.Genes",
+         "log2_fold_change" = "Log2.Fold.Change..Positive.values.are.upregulated.in.DEL.",
+         "p_value" = "Adjusted.P.Value") %>%
+  #add columns for the data source, sample type, and extras to match the above dataset
+  mutate("gene_description" = "", "sample_type" = "hIPSC", "data_source" = "Roth et al. 2020", "ENSEMBL_ID" = "") %>%
+  #reorder columns to match the other dataframes
+  relocate("gene_description", .after = "gene_name") %>%
+  relocate("Present.in.the.16p11.2.Region", .after = "ENSEMBL_ID")
+
+```
+
+3. Talkowski 2014 data
+```{r} 
+Talkowski2014_tidy <- Talkowski2014 %>% 
+  select(-c("GeneInfo", "Chr", "Start", "Stop")) %>%
+  #select(-c("GeneInfo", "Chr", "Start", "Stop")) %>%
+  #Transforming the foldchange to log2 foldchange
+  mutate("FoldChange" = log2(FoldChange)) %>%
+  #rename columns to the standardized names I decided on
+  rename("gene_name" = "GeneID",
+         "log2_fold_change" = "FoldChange",
+         "p_value" = "permPval_Del") %>%
+  #add columns for the data source, sample type, and extras to match the above dataset
+  mutate("gene_description" = "", "sample_type" = "hLCL", "data_source" = "Talkowski et al. 2014", "ENSEMBL_ID" = "", "Present.in.the.16p11.2.Region" = "") %>%
+  #reorder columns to match the other dataframes
+  relocate("gene_description", .after = "gene_name") %>%
+  relocate("p_value", .after = "log2_fold_change")
+
+```
+
+Potential next step: I tried to add in the ensembl ID for the Talkowski 2014 data, but that dataset used an old refrence transcriptome and so, using the 
+chromosomal start and stop positions and chromosome number, I was unable to find the ensembl ID for the genes in that dataset. I
+
+
+
+
+Now, I want to fill in the "Present.in.the.16p11.2.Region" column for the DEG_all_timepoints_organoid_Urresti2021_modified_columns dataframe. 
+```{r}
+# The vector sixteenP11.2_genes is a vector containing all genes located in the 16p11.2 chromosomal region
+# I want to change the value of the "Present.in.the.16p11.2.Region" column to "Yes" if the gene name is in the vector, and "No" if it is not
+
+Urresti2021_3M_organoid_tidy$Present.in.the.16p11.2.Region <-
+  ifelse(Urresti2021_3M_organoid_tidy$gene_name %in% sixteenP11.2_genes, "Yes", "No")
+Roth2020_tidy$Present.in.the.16p11.2.Region <-
+  ifelse(Roth2020_tidy$gene_name %in% sixteenP11.2_genes, "Yes", "No")
+Talkowski2014_tidy$Present.in.the.16p11.2.Region <-
+  ifelse(Talkowski2014_tidy$gene_name %in% sixteenP11.2_genes, "Yes", "No")
+
+```
+
+
+Now I combine all 3 organized dataframes into 1 dataframe
+```{r}
+all_DEG_data <- rbind(Urresti2021_3M_organoid_tidy, Roth2020_tidy, Talkowski2014_tidy)
+
+# Now, I want to look at the genes in the 16p11.2 region only, from the all DEG data. So I will filter the all_DEG_data dataframe to only include those genes
+all_DEG_16p_genes <- all_DEG_data %>%
+  filter(Present.in.the.16p11.2.Region == "Yes")
+
+```
+
+
+No I will do a metaanalysis to combine every instance of a gene into one row, so that I can see all the data for each gene in one row
+Log fold change is weighted by p-value
+p values are combined with fishers exact test
+```{r}
+meta_analysis_all_DEG_data <- all_DEG_data %>%
+  group_by(gene_name) %>%
+  summarize(combined_log2_fold_change = sum(log2_fold_change / (p_value + 1e-8)) / sum(1 / (p_value + 1e-8)),  # Weighted logFC using p-values.
+            # A small constant (1e-8) is added to avoid division by zero if there are very small p-values.
+            #in the next line of code I will do a fisher test to combine the p-values
+            combined_p_value = 1 - pchisq(sum(qchisq(1 - p_value, 1, lower.tail = FALSE)), length(p_value), lower.tail = FALSE)) %>%
+  #the above code will return a dataframe that only contains 3 of the columns. In the next line of code I will bring the rest of the columns back to this new dataframe
+  left_join(all_DEG_data, by = "gene_name")
+
+
+#Maybe it would be a good idea to keep track of if the gene combined logfoldcahnge and p-value are from multiple data sources
+meta_analysis_all_DEG_data$multiple_data_sources <- ifelse(duplicated(meta_analysis_all_DEG_data$gene_name) | duplicated(meta_analysis_all_DEG_data$gene_name, fromLast = TRUE), "Yes", "No")
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
