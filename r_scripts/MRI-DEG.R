@@ -157,7 +157,7 @@ write_csv(cor_results_t_value_spearman, "AHBA_MRI_correlation_t_value_Spearman.c
 
 #Now I want to plot the correlation coefficients and p values for the genes in the 16p locus and the genes not in the 16p locus
 
-#Scatrerplot showing relationship between p value and correlation, not super useful but educational for me!
+#Scatterplot showing relationship between p value and correlation, not super useful but educational for me!
 ggplot(cor_results_t_value_spearman, aes(x=p_value, y=correlation, color=in_16p_locus)) +
   geom_point() +
   labs(title = "Spearman correlation of t-value",
@@ -182,8 +182,6 @@ ggplot(cor_results_t_value_spearman, aes(x=correlation, fill=in_16p_locus)) +
        y = "Frequency") +
   theme_minimal() +
   xlim(-0.6, 0.6) + ylim(0, 8)
-
-
 
 ggplot(cor_results_Estimate_spearman, aes(x=correlation, fill=in_16p_locus)) +
   geom_histogram(position = "identity", alpha = 0.6) +
@@ -229,7 +227,7 @@ interactive_plot_estimate <- ggplotly(scatter_plot_estimate, tooltip = c("text")
 interactive_plot_estimate # Display the interactive plot
 
 #Doing the same plot, but for t-value
-scatter_plot_estimate <- ggplot(AHBA_MRI_merged_organized, aes(x = AHBA_expression, y = Estimate, color = region)) +
+scatter_plot_t_value <- ggplot(AHBA_MRI_merged_organized, aes(x = AHBA_expression, y = Estimate, color = region)) +
   geom_point(size = 0.1) + 
   geom_smooth(method = "lm", se = FALSE, color = "blue", linewidth = 0.5) +  # Add a line of best fit (linear regression)
   labs(title = "Scatter plots of AHBA Expression vs Estimate for all Genes",
@@ -241,16 +239,14 @@ scatter_plot_estimate <- ggplot(AHBA_MRI_merged_organized, aes(x = AHBA_expressi
            method = "pearson", label.x = 3, label.y = 0)  # Add correlation coefficients to the plot
 
 # Convert to a plotly object
-interactive_plot_estimate <- ggplotly(scatter_plot, tooltip = c("text"))
-interactive_plot # Display the interactive plot
+interactive_plot_t_value <- ggplotly(scatter_plot, tooltip = c("text"))
+interactive_plott_value # Display the interactive plot
 
 
 
 
 # Doing the above plotting for the 16p genes ----
 AHBA_MRI_merged_organized_IN_16p_locus <- AHBA_MRI_merged_organized %>% filter(in_16p_region == "Yes")
-
-
 
 scatter_plot_16p_genes <- ggplot(AHBA_MRI_merged_organized_IN_16p_locus, aes(x = AHBA_expression, y = Estimate, color = region)) +
   geom_point(size = 0.1) + 
@@ -290,7 +286,7 @@ interactive_plot_NOT_16p_genes <- ggplotly(scatter_plot_NOT_16p_genes, tooltip =
 
 # Display the interactive plot
 interactive_plot_NOT_16p_genes
-scatter_plot
+
 
 
 
