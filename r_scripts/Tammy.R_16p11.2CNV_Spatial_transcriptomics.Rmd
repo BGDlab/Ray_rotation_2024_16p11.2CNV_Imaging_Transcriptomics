@@ -16,8 +16,6 @@ The preview shows you a rendered HTML copy of the contents of the editor. Conseq
 Import necessary libraries
 ```{r}
 library(tidyverse)
-
-
 ```
 
 Importing necesary CSV files
@@ -366,7 +364,7 @@ Exporting dataframes as CSVs
 setwd("/Users/tammyray/Desktop/aaron_lab_2024/output")
 write.csv(AHBA_normed_pivot, "Normed_AHBA_sig_genes.csv")
 write.csv(AHBA_normed_pivot_sigONLY, "Normed_AHBA_sig_genes_ONLY.csv")
-write.csv(AHBA_sig_genes_all_pivot_ONLY, "Raw_AHBA_sig_genes_ONLY.csv")
+write.csv(AHBA_sig_genes_pivot, "Raw_AHBA_sig_genes_ONLY.csv")
 ```
 
 
