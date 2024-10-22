@@ -1,0 +1,709 @@
+---
+title: "16p11.2 CNV project"
+output: html_notebook
+---
+
+The purpose of this code is to probe Smrithi's 16p MRI data (comparing brain size of DK parcellations in individuals with 16p11.2 duplications and deletions to healthy controls, using a spline-based model). I did a literature search and found 3 papers containing sequencing data on various 16p11.2 CNV human models (lymphoblastoid cell lines, human derived iPSC, cortical organoids). I found 3 articles:
+
+-2014 Talkowski et al. | Transcriptional Consequences of 16p11.2 Deletion and Duplication in Mouse Cortex and Multiplex Autism Families
+-2020 Roth et al. | 16p11.2 microdeletion imparts transcriptional alterations in human iPSC-derived models of early neural development
+-2021 Urresti et al. | Cortical organoids model early brain development disrupted by 16p11.2 copy number variants in autism
+
+I downloaded available differentially expressed genes data for the 16p deletion and duplication (if available).
+
+In the following code, I analyzed the deletion data. I first organized the data from these 3 sources, then combined them into one dataframe (log-fold-change was weighted by p-values, and p-values were combined with fishers method).
+
+I then filtered the data by significance of the combined p-values, only keeping genes with a combined p-value of p<0.001, and moved forward with analysis for these genes.
+Of note, 21 out of the 27 genes in the 16p11.2 locus were in this gene list. I did a quick search and found that the following genes were not included in the p<0.001 list, and here is why:
+
+C16orf54: not significant at all (p=0.74)
+C16orf92: not significant at all (p=0.40)
+SPN: significant at p<0.01 level
+TBX6: significant at p<0.01 level
+ZG16: NOT IN DEG LIST
+
+I then did gene ontology analysis on all p<0.001 significant genes. Some genes were not included in the analysis, because the geneID was ambiguous (i.e. multiple entries for one gene name) or not found in their database. I tried to troubleshoot by identifying the ensembl ID for genes from the Talkowski 2014 paper, using the chromosome number, start, and stop positions given in the paper, but this did not work, likely because a different reference genome was used. A future QC step is to actually get the ensembl ID for these genes, so that all significant genes can be put through the GO analysis.
+
+Next, I mapped the p<0.001 significant genes to the Allen Human Brain Atlas spatial map. I first used the raw expression values, and then used the normed AHBA expression values. The normed values were used in all further analysis steps
+
+I then mapped the normalized AHBA spatial expression data to Smrithi's MRI data. For each gene, I did a basic correlation (pearson, and also spearman) of the gene expression using the t-value and the correlation coefficient (estimate). I need to ask Smrithi what value is better to use.
+
+
+10/22 NEXT STEPS/TO DOS:
+- finish qcing this document
+- plot GO analysis, like Jakob wanted it to look
+- gene name/ensembl ID link up for GO analysis
+  - first make sure GOST function can take ensembl IDs
+- ask Smrithi which value I should use for correlation: estimate or t-value
+- next steps: i could also do the duplication data!
+- # Question from Ayan: should you be using the spin test to compute p values for these correlations?
+
+
+
+
+
+
+Import necessary libraries
+```{r}
+library(tidyverse)
+```
+
+Importing necessary CSV files
+```{r}
+#Setting working directory
+path2wd <- "/Users/tammyray/Desktop/aaron_lab_2024/"
+
+setwd(paste0(path2wd,"CSV_data_sheets/transcriptomic_datasheets")) 
+
+#Importing transcriptomic data sets
+Talkowski2014 <- read.csv("Talkowski_2014_TableS3_Human_Del.csv")
+Urresti2021_3M_organoid <- read.csv("Urresti-2021_DEG-3M-cortical-organoid.csv")
+Roth2020 <-  read.csv("Roth_2020_DEG-hIPSC-neural-endodermMesoderm.csv")
+
+#Creating a vector of all genes in the 16p11.2 chromosomal region. Gene list from figure 1 Rein and Yan 2020 "16p11.2 Copy Number Variations and Neurodevelopmental Disorders"
+sixteenP11.2_genes <- c("SPN", "QPRT", "C16orf54", "ZG16", "KIF22", "MAZ", "PRRT2", "C16orf53", "MVP", "CDIPT", "SEZ62L", "ASPHD1", "KCTD13", "TMEM219", "TAOK2", "HIRIP3", "INO80E", "DOC2A", "C16orf92", "FAM57B", "ALDOA", "PPP4C", "TBX6", "YPEL3", "GDPD3", "MAPK3", "CORO1A")
+
+```
+
+Tidying up data frames, such that they have the same column names, in order to combine them into one data frame
+
+1. Uresti 2021 cortical organoids data
+```{r}
+Urresti2021_3M_organoid_tidy <- Urresti2021_3M_organoid %>%
+  #remove columns that I do not need
+  select(-c("Gene.Biotype", "log2.FC..DUP.vs.DEL", "P.value..DUP.vs.DEL", "FDR.adjusted.P.value..DUP.vs.DEL", "log2.FC..DUP.vs.CTL",
+            "P.value..DUP.vs.CTL", "FDR.adjusted.P.value..DUP.vs.CTL", "FDR.adjusted.P.value..DEL.vs.CTL")) %>%
+  #rename columns to the standardized names I decided on
+  rename("gene_name" = "HGNC.Symbol",
+         "log2_fold_change" = "log2.FC..DEL.vs.CTL",
+         "p_value" = "P.value..DEL.vs.CTL",
+         "gene_description" = "Description", 
+         "ENSEMBL_ID" = "ENSEMBL.ID") %>%
+  #add columns for new information I want to include
+  mutate( "sample_type" = "cortical organoid", "data_source" = "Urresti et al. 2021", "Present.in.the.16p11.2.Region" = "") %>%
+  #reorder columns to match the other data frames
+  relocate("ENSEMBL_ID", .after = "data_source")
+
+```
+
+2. Roth 2020 data
+```{r}
+Roth2020_tidy <- Roth2020 %>%
+  #remove columns that I do not need
+  select(-c("SFARI.Gene.Score", "SFARI.Gene.Score.Category", "https...gene.sfari.org.about.gene.scoring.criteria.")) %>%
+  #rename columns to the standardized names I decided on
+  rename("gene_name" = "X16p11.2.DE.Genes",
+         "log2_fold_change" = "Log2.Fold.Change..Positive.values.are.upregulated.in.DEL.",
+         "p_value" = "Adjusted.P.Value") %>%
+  #add columns for new information I want to include, and to match columns other data frames have
+  mutate("gene_description" = "", "sample_type" = "hIPSC", "data_source" = "Roth et al. 2020", "ENSEMBL_ID" = "") %>%
+  #reorder columns to match the other data frames
+  relocate("gene_description", .after = "gene_name") %>%
+  relocate("Present.in.the.16p11.2.Region", .after = "ENSEMBL_ID")
+
+```
+
+3. Talkowski 2014 data
+```{r} 
+Talkowski2014_tidy <- Talkowski2014 %>% 
+  #remove columns that I do not need
+  select(-c("GeneInfo", "Chr", "Start", "Stop")) %>%
+  #Transforming the foldchange to log2 foldchange
+  mutate("FoldChange" = log2(FoldChange)) %>%
+  #rename columns to the standardized names I decided on
+  rename("gene_name" = "GeneID",
+         "log2_fold_change" = "FoldChange",
+         "p_value" = "permPval_Del") %>%
+  #add columns for new information I want to include, and to match columns other data frames have
+  mutate("gene_description" = "", "sample_type" = "hLCL", "data_source" = "Talkowski et al. 2014", "ENSEMBL_ID" = "", "Present.in.the.16p11.2.Region" = "") %>%
+  #reorder columns to match the other data frames
+  relocate("gene_description", .after = "gene_name") %>%
+  relocate("p_value", .after = "log2_fold_change")
+
+```
+
+
+
+Potential next step: I tried to add in the ensembl ID for the Talkowski 2014 data, but that dataset used an old refrence transcriptome and so, using the 
+chromosomal start and stop positions and chromosome number, I was unable to find the ensembl ID for the genes in that dataset. I want to troubleshoot this further so that all genes can be put through the GO analysis.
+
+
+
+
+Now, I want to fill in the "Present.in.the.16p11.2.Region" column for all data frames, to keep track of which genes are in the 16p11.2 locus
+```{r}
+# The vector sixteenP11.2_genes is a vector containing all genes located in the 16p11.2 chromosomal region
+# I want to change the value of the "Present.in.the.16p11.2.Region" column to "Yes" if the gene name is in the vector, and "No" if it is not
+Urresti2021_3M_organoid_tidy$Present.in.the.16p11.2.Region <-
+  ifelse(Urresti2021_3M_organoid_tidy$gene_name %in% sixteenP11.2_genes, "Yes", "No")
+Roth2020_tidy$Present.in.the.16p11.2.Region <-
+  ifelse(Roth2020_tidy$gene_name %in% sixteenP11.2_genes, "Yes", "No")
+Talkowski2014_tidy$Present.in.the.16p11.2.Region <-
+  ifelse(Talkowski2014_tidy$gene_name %in% sixteenP11.2_genes, "Yes", "No")
+
+```
+
+
+Combining all 3 organized data frames into 1 data frame
+```{r}
+# Combining all 3 data frames into one data frame
+all_DEG_data <- rbind(Urresti2021_3M_organoid_tidy, Roth2020_tidy, Talkowski2014_tidy)
+
+# Now, I want to look at the genes in the 16p11.2 region only, from the all DEG data. So I will filter the all_DEG_data dataframe to only include those genes
+all_DEG_16p_genes <- all_DEG_data %>%
+  filter(Present.in.the.16p11.2.Region == "Yes")
+
+```
+
+
+Now I will do a meta-analysis to combine every instance of a gene into one observation
+- Log fold change is weighted by p-value
+- p values are combined with fishers exact test
+```{r}
+meta_analysis_all_DEG_data <- all_DEG_data %>%
+  group_by(gene_name) %>%
+  summarize(combined_log2_fold_change = sum(log2_fold_change / (p_value + 1e-8)) / sum(1 / (p_value + 1e-8)),  # Weighted logFC using p-values.
+            # A small constant (1e-8) is added to avoid division by zero if there are very small p-values.
+            # Fisher test to combine the p-values
+            combined_p_value = 1 - pchisq(sum(qchisq(1 - p_value, 1, lower.tail = FALSE)), length(p_value), lower.tail = FALSE)) %>%
+  #"ungrouping" the data, bring the rest of the columns back to this new dataframe
+  left_join(all_DEG_data, by = "gene_name")
+
+#Keep track of if the gene combined logfoldcahnge and p-value are from multiple data sources
+meta_analysis_all_DEG_data$multiple_data_sources <- ifelse(duplicated(meta_analysis_all_DEG_data$gene_name) | duplicated(meta_analysis_all_DEG_data$gene_name, fromLast = TRUE), "Yes", "No")
+
+#Now, I want to delete rows that have the same gene name and remove the columns that have the original log2_fold_change, p_value, sample_type, and data_source
+meta_analysis_all_DEG_data <- meta_analysis_all_DEG_data %>%
+  distinct(gene_name, .keep_all = TRUE) %>%
+  select(-c(log2_fold_change, p_value, sample_type, data_source)) %>%
+  # adding a column called significance that will indicate the degree of significance, just like Smrithi's code
+  mutate("significance" = case_when(
+    combined_p_value < 0.001 ~ "***",
+    combined_p_value < 0.01 ~ "**",
+    combined_p_value < 0.05 ~ "*",
+    TRUE ~ " "))
+
+#Now i will create a new dataframe with only the genes that are significantly differentially expressed at combined p-value < 0.001
+sig_genes_p0.001_DEG_data <- meta_analysis_all_DEG_data %>%
+  filter(significance == "***")
+
+```
+
+Exporting the data frames to CSV files, if desired
+```{r}
+setwd(paste0(path2wd,"output"))
+
+write.csv(Urresti2021_3M_organoid_tidy, file="Urresti2021_3M_organoid_tidy.csv")
+write.csv(Roth2020_tidy, file="Roth2020_tidy.csv")
+write.csv(Talkowski2014_tidy, file="Talkowski2014_tidy.csv")
+write.csv(all_DEG_data, file="all_DEG_data.csv")
+write.csv(meta_analysis_all_DEG_data, file="meta_analysis_all_DEG_data.csv")
+write.csv(sig_genes_p0.001_DEG_data, file="sig_genes_p0.001_DEG_data.csv")
+```
+
+
+Gene ontology analysis, using gprofiler2 to do my GO analysis
+Loading gprofiler2 package
+```{r}
+library(gprofiler2)
+```
+
+
+Doing GO analysis
+```{r}
+# Making vector of genes in sig gene dataframe
+exp_gene_list_1_p_0.001 <- sig_genes_p0.001_DEG_data$gene_name
+
+# using gost function from gprofiler2 to do GO analysis
+GO_results_exp_gene_list_p0.001 = gost(query = exp_gene_list_1_p_0.001,
+               organism = "hsapiens",
+               correction_method = "fdr")
+GO_all_results_p0.001 <- GO_results_exp_gene_list_p0.001$result %>%
+  select(-parents)
+
+#putting metadata from GO analysis into a dataframe
+GO_meta_p0.001 <- GO_results_exp_gene_list_p0.001$meta
+
+
+#Creating gene lists for upregulated and downregulated genes
+UPregulated_sig_genes_p0.001_DEG_data <- sig_genes_p0.001_DEG_data %>%
+  filter(combined_log2_fold_change > 0)
+UPregulated_exp_gene_list_1_p_0.001 <- UPregulated_sig_genes_p0.001_DEG_data$gene_name
+
+DOWNregulated_sig_genes_p0.001_DEG_data <- sig_genes_p0.001_DEG_data %>%
+  filter(combined_log2_fold_change < 0)
+DOWNregulated_sig_genes_p0.001_DEG_data <- DOWNregulated_sig_genes_p0.001_DEG_data$gene_name
+
+
+# GO analysis of upregulated genes
+gostres_UPregulated <- gost(query = UPregulated_exp_gene_list_1_p_0.001,
+               organism = "hsapiens",
+               correction_method = "fdr")
+
+gostres_UPregulated <- gostres_UPregulated$result
+
+# GO analysis of downregulated genes
+gostres_DOWNregulated <- gost(query = DOWNregulated_sig_genes_p0.001_DEG_data,
+                            organism = "hsapiens",
+                            correction_method = "fdr")
+
+gostres_DOWNregulated <- gostres_DOWNregulated$result
+```
+
+
+I want to graph the GO analysis results!!!!!!!!!!!!!!!!
+
+
+Exporting the GO analysis data frames to CSV files, if desired
+```{r}
+setwd(paste0(path2wd,"output"))
+write.csv(GO_all_results_p0.001, file=paste0(path2wd,"output/GO_16p11.2-DEGs_p0.001_fdr-corrections.csv"), row.names = FALSE) 
+```
+
+
+Now, I will generate a map of our significant genes using AHBA spatial transcriptomic data
+
+Read in the data
+```{r}
+AHBA <- read_tsv(paste0(path2wd,"CSV_data_sheets/AllenHBA_DK_ExpressionMatrix.tsv"))
+# Change the column header of the first column of the AHBA data frame to gene_symbol
+colnames(AHBA)[1] <- "gene_symbol"
+```
+
+Mapping our significant genes to the AHBA dataset
+```{r}
+#Creating vector of gene names in our experimental groups
+#sig_genes_p0.001_DEG_data is a previously created data frame containing all significant genes
+sig_gene_list <- sig_genes_p0.001_DEG_data$gene_name #vector of all significant genes names
+# sixteenP11.2_genes is a previously created vector containing all genes in 16p11.2 locus
+
+#Filtering AHBA raw expression table to incldue ONLY genes in our sig_gene_list
+AHBA_sig_genes <- AHBA %>% filter(gene_symbol %in% sig_gene_list)
+
+#NOTE: not all significant genes mapped to AHBA data set. Here is a list of them so I can troubleshoot later
+genes_not_mapped <- sig_gene_list[!(sig_gene_list %in% AHBA_sig_genes$gene_symbol)] # From Ayan: I just looked through some of these using this website (https://www.meduniwien.ac.at/neuroimaging/mRNA.html) I think some of these genes are likely avialble but perhaps not accessed due to differences in naming convention etc. 
+```
+NOTE: Only 87 of the 132 genes mapped to the AHBA dataset: TO TROUBLESHOOT
+
+
+Tidying the AHBA significant genes data frame
+```{r}
+AHBA_sig_genes_pivot <- AHBA_sig_genes %>%
+  #remove the "Average donor correlation to the median" column
+  select(-"Average donor correlation to median") %>%
+  # pivoting data frame so that it is in a long format
+  pivot_longer(cols = -gene_symbol, names_to = "region", values_to = "expression") %>%
+  #adding a column for if gene is in the 16p region
+  mutate(in_16p_region = ifelse(gene_symbol %in% sixteenP11.2_genes, "Yes", "No")) %>%
+  # Adding a column for if gene is up- or down-regulated
+  mutate(upreg = ifelse(gene_symbol %in% UPregulated_exp_gene_list_1_p_0.001, "Yes", "No"))
+```
+
+
+GGplot to visualize the data
+```{r}
+# Visualizing expression data of significant genes
+ggplot(AHBA_sig_genes_pivot, aes(x=expression, y=region, shape=in_16p_region, color=gene_symbol)) + 
+  geom_point() + 
+  labs(title = "regional expression of significant genes from 16p del meta-analysis", x = "Raw Expression", y = "Brain Region") +
+  theme_minimal() +
+  #Making the legend smaller and putting it underneath the graph because it is too big
+  theme(legend.position = "bottom") +
+  guides(color="none")
+
+# same plot but aesthetics only for genes in 16p region
+ggplot(AHBA_sig_genes_pivot, aes(x=expression, y=region, color=in_16p_region)) + 
+  geom_point() + 
+  labs(title = "regional expression of significant genes from 16p del meta-analysis", x = "Raw Expression", y = "Brain Region") +
+  theme_minimal() +
+  # Moving legend underneath the graph
+  theme(legend.position = "bottom") 
+
+
+ggplot(AHBA_sig_genes_pivot, aes(x=expression, y=region, color=upreg)) + 
+  geom_point() + 
+  labs(title = "regional expression of significant genes from 16p del meta-analysis", x = "Raw Expression", y = "Brain Region") +
+  theme_minimal() +
+  # Moving legend underneath the graph
+  theme(legend.position = "bottom") 
+
+```
+
+
+
+Now, we want to work with the normalized AHBA values. They are in a matlab file, so first I will need to convert the matlab file to something R can read, with the R.matlab package. 
+NOTE: The R.matlab package does not keep column names of the original data when converting things, so I had to add them back in manually.
+
+First, load libraries
+```{r}
+library(R.matlab)
+```
+
+Second, load in relevant files
+```{r}
+setwd(paste0(path2wd,"CSV_data_sheets"))
+AHBA_normed <- readMat("ROIxGene_aparcaseg_INT.mat") 
+
+setwd(paste0(path2wd,"CSV_data_sheets"))
+region_array <- read_csv("Region_labels_for_aparcaseg_parcellation.csv", col_names = FALSE)
+```
+
+Tidying up the AHBA_normed dataframe
+```{r}
+AHBA_parcel_expression0 <- as.data.frame(AHBA_normed$parcelExpression)
+# Getting list of gene names 
+array_gene_names <- unlist(AHBA_normed$probeInformation[[2]])
+# First I need to edit my array_gene_names to add a 0 as the first item in my array
+array_gene_names <- c(0, array_gene_names)
+# Renaming the columns of the AHBA_parcel_expression data frame to the the gene names in array_gene_names
+colnames(AHBA_parcel_expression0) <- array_gene_names
+
+#Now, I want to change the values of column 1 of the AHBA_parcel_expression0 data frame to the values in the region_array data frame
+#I will mutate the data frame to add the array as a column, move that column to the front, and then remove the original column
+AHBA_parcel_expression0_labeled <- AHBA_parcel_expression0 %>%
+  mutate(region = region_array) %>%
+  #Move the region variable to the first column
+  select(region, everything()) %>%
+  select(-"0")
+
+# Pivot the table so that it matches the AHBA_sig_genes_all_pivot table
+AHBA_normed_pivot <- AHBA_parcel_expression0_labeled %>%
+  pivot_longer(cols = -region, names_to = "gene_symbol", values_to = "expression") %>%
+  mutate(in_16p_region = ifelse(gene_symbol %in% sixteenP11.2_genes, "Yes", "No")) %>%
+  unnest(cols = region)
+
+# Making a data frame with only the significant genes
+AHBA_normed_pivot_sigONLY <- AHBA_normed_pivot %>%
+  filter(gene_symbol %in% sig_gene_list)
+# Now, I want to change the column name X1 to region
+colnames(AHBA_normed_pivot_sigONLY)[1] <- "region"
+
+```
+
+Exporting dataframes as CSVs
+```{r}
+setwd(paste0(path2wd,"output"))
+write.csv(AHBA_normed_pivot, "Normed_AHBA_sig_genes.csv")
+write.csv(AHBA_normed_pivot_sigONLY, "Normed_AHBA_sig_genes_ONLY.csv")
+write.csv(AHBA_sig_genes_pivot, "Raw_AHBA_sig_genes_ONLY.csv")
+```
+
+
+Plotting the normalized AHBA data
+```{r}
+ggplot(AHBA_normed_pivot_sigONLY, aes(x=expression, y=region, color=gene_symbol)) + 
+  geom_point() + 
+  labs(title = "NORMALIZED regional expression of significant genes from 16p del meta-analysis", x = "Normalized Expression", y = "Brain Region") +
+  theme_minimal() +
+  #I will remove the legend because it is too big
+  theme(legend.position = "none")
+
+# Visualizing expression data of significant genes
+ggplot(AHBA_normed_pivot_sigONLY, aes(x=expression, y=region, shape=in_16p_region, color=gene_symbol)) + 
+  geom_point() + 
+  labs(title = "NORMALIZED regional expression of significant genes from 16p del meta-analysis", x = "Normalized Expression", y = "Brain Region") +
+  theme_minimal() +
+  theme(legend.position = "bottom") +
+  guides(color="none")
+
+# same plot but aesthetics only for genes in 16p region
+ggplot(AHBA_normed_pivot_sigONLY, aes(x=expression, y=region, color=in_16p_region)) + 
+  geom_point() + 
+  labs(title = "NORMALIZED regional expression of significant genes from 16p del meta-analysis", x = "Normalized Expression", y = "Brain Region") +
+  theme_minimal() +
+  theme(legend.position = "bottom") 
+```
+
+Now I will map the normalized AHBA data to Smrithi's MRI data, which is in a csv file: 16panalysis_BH_adjusted.csv
+
+Importing necessary files
+```{r}
+setwd(paste0(path2wd,"output"))
+MRI <- read_csv("16panalysis_BH_adjusted.csv")
+
+# Outside of R, I have made a CSV of corresponding AHBA and Smrithi MRI data region names. First column is AHBA names, second column is MRI names.
+# Importing the data
+setwd(paste0(path2wd,"CSV_data_sheets"))
+standard_region_names <- read_csv("AHBA_MRI_region_names.csv")
+
+# Reminder: sixteenP11.2_genes is a previously created vector of all genes in 16p locus
+```
+
+
+Tidying Smrithi's MRI data
+```{r}
+# We decided that we will use model 3, Spline TCV model, and for now I only have the deletion data
+MRI_model3 <- MRI %>%
+  filter(Genotype == "Genotype16pDeletion...5")
+
+#MRI regions to remove. I made this list manually
+MRI_regions_to_remove <- c("L.Cerebral_WM", "L.cerebral_cortex", "L.lateral_ventricle", "L.inferior_lateral_ventricle", "L.cerebellum_WM", "L.cerebellum_cortex", 
+                           "L.thalamus", "L.caudate", "L.putamen", "L.pallidum", "L.accumbens", "L.hippocampus", "L.amygdala", "L.ventral_DC", "Third_Ventricle", 
+                           "Fourth_Ventricle", "Brainstem", "CSF", "R.Cerebral_WM", "R.cerebral_cortex", "R.lateral_ventricle", "R.inferior_lateral_ventricle", 
+                           "R.cerebellum_WM", "R.cerebellum_cortex", "R.thalamus", "R.caudate", "R.putamen", "R.pallidum", "R.hippocampus", "R.amygdala", "R.accumbens", 
+                           "R.ventral_DC", "R.ctx_bankssts", "R.ctx_caudalanteriorcingulate", "R.ctx_caudalmiddlefrontal", "R.ctx_cuneus", "R.ctx_entorhinal", "R.ctx_fusiform", 
+                           "R.ctx_inferiorparietal", "R.ctx_inferiortemporal", "R.ctx_isthmuscingulate", "R.ctx_lateraloccipital", "R.ctx_lateralorbitofrontal", "R.ctx_lingual", 
+                           "R.ctx_medialorbitofrontal", "R.ctx_middletemporal", "R.ctx_parahippocampal", "R.ctx_paracentral", "R.ctx_parsopercularis", "R.ctx_parsorbitalis", 
+                           "R.ctx_parstriangularis", "R.ctx_pericalcarine", "R.ctx_postcentral", "R.ctx_posteriorcingulate", "R.ctx_precentral", "R.ctx_precuneus", 
+                           "R.ctx_rostralanteriorcingulate", "R.ctx_rostralmiddlefrontal", "R.ctx_superiorfrontal", "R.ctx_superiorparietal", "R.ctx_superiortemporal", 
+                           "R.ctx_supramarginal", "R.ctx_frontalpole", "R.ctx_temporalpole", "R.ctx_transversetemporal", "R.ctx_insula", "cGMV", "WMV", "sGMV", "Ventricles", 
+                           "Cerebellum", "Accumbens", "Ventral_Diencephalon", "Pallidum", "Hippocampus", "Caudate", "Cerebral_White_Matter", "Lateral_Ventricle", "Cerebral_Cortex", 
+                           "Thalamus", "Putamen", "Amygdala", "Cerebellar_White_Matter", "Cerebellar_Cortex", "Inferior_Lateral_Ventricle", "ctx_bankssts", "ctx_caudalanteriorcingulate", 
+                           "ctx_caudalmiddlefrontal", "ctx_cuneus", "ctx_entorhinal", "ctx_fusiform", "ctx_inferiorparietal", "ctx_inferiortemporal", "ctx_isthmuscingulate", 
+                           "ctx_lateraloccipital", "ctx_lateralorbitofrontal", "ctx_lingual", "ctx_medialorbitofrontal", "ctx_middletemporal", "ctx_parahippocampal", 
+                           "ctx_paracentral", "ctx_parsopercularis", "ctx_parsorbitalis", "ctx_parstriangularis", "ctx_pericalcarine", "ctx_postcentral", "ctx_posteriorcingulate", 
+                           "ctx_precentral", "ctx_precuneus", "ctx_rostralanteriorcingulate", "ctx_rostralmiddlefrontal", "ctx_superiorfrontal", "ctx_superiorparietal", 
+                           "ctx_superiortemporal", "ctx_supramarginal", "ctx_frontalpole", "ctx_temporalpole", "ctx_transversetemporal", "ctx_insula")
+
+# removing rows for the regions we aren't including
+MRI_model3_leftHem <- MRI_model3 %>%
+  filter(VolumetricComponent %in% MRI_regions_to_remove == FALSE) %>%
+  rename(region = VolumetricComponent)
+
+# Standardizing region names
+standard_region_names <- standard_region_names %>%
+  rename(region = "left hemisphere Smrithi regions",
+         new_region = "AHBA regions")
+
+# Use left_join to map the new names based on the region variable
+MRI_model3_leftHem_new_regionNames <- MRI_model3_leftHem %>%
+  left_join(standard_region_names, by = "region") %>%   # Join based on the region variable
+  mutate(region = ifelse(!is.na(new_region), new_region, region)) %>%   # Replace region names with new ones
+  select(-new_region)
+```
+
+
+Merging the AHBA normed values with Smrithi's MRI data
+```{r}
+AHBA_MRI_merged <- full_join(AHBA_normed_pivot_sigONLY, MRI_model3_leftHem_new_regionNames, by = "region", multiple = "all")
+
+AHBA_MRI_merged_organized <- AHBA_MRI_merged %>%
+  select(-Genotype)
+
+#renaming columns for clarity, and so there is no spaces in column names
+colnames(AHBA_MRI_merged_organized)[3] <- "AHBA_expression"
+colnames(AHBA_MRI_merged_organized)[8] <- "t_value"
+```
+
+
+Exporting as csv AHBA_MRI_merged_organized
+```{r}
+setwd(paste0(path2wd,"CSV_data_sheets"))
+write_csv(AHBA_MRI_merged_organized, "AHBA_MRI_merged.csv")
+```
+
+
+
+Pearson/Spearman correlation analysis between the AHBA expression and the MRI data
+
+Making functions to compute correlation and p-value, created by ChatGPT
+```{r}
+correlation_with_pvalue_pearson <- function(x, y) {
+  test <- cor.test(x, y, method = "pearson")
+  return(data.frame(correlation = test$estimate, p_value = test$p.value))
+}
+
+correlation_with_pvalue_spearman <- function(x, y) {
+  test <- cor.test(x, y, method = "spearman")
+  return(data.frame(correlation = test$estimate, p_value = test$p.value))
+}
+```
+
+Running the correlation analysis
+```{r}
+# Group by gene_symbol and compute correlation between AHBA_expression and Estimate
+cor_results_Estimate_pearson <- AHBA_MRI_merged_organized %>%
+  group_by(gene_symbol) %>%
+  summarize(correlation = cor(AHBA_expression, Estimate, method = "pearson"),
+            p_value = correlation_with_pvalue_pearson(AHBA_expression, Estimate)$p_value) %>%
+  mutate(in_16p_locus = ifelse(gene_symbol %in% sixteenP11.2_genes, "Yes", "No"))
+
+#Trying a spearman correlation analysis instead
+cor_results_Estimate_spearman <- AHBA_MRI_merged_organized %>%
+  group_by(gene_symbol) %>%
+  summarize(correlation = cor(AHBA_expression, Estimate, method = "spearman"),
+            p_value = cor.test(AHBA_expression, Estimate, method = "spearman")$p.value) %>%
+  mutate(in_16p_locus = ifelse(gene_symbol %in% sixteenP11.2_genes, "Yes", "No"))
+
+# Doing the same thing for the t value
+# Pearson correlation
+cor_results_t_value_pearson <- AHBA_MRI_merged_organized %>%
+  group_by(gene_symbol) %>%
+  summarize(correlation = cor(AHBA_expression, t_value, method = "pearson"),
+            p_value = correlation_with_pvalue_pearson(AHBA_expression, t_value)$p_value) %>%
+  mutate(in_16p_locus = ifelse(gene_symbol %in% sixteenP11.2_genes, "Yes", "No"))
+
+#Spearman correlation
+cor_results_t_value_spearman <- AHBA_MRI_merged_organized %>%
+  group_by(gene_symbol) %>%
+  summarize(correlation = cor(AHBA_expression, t_value, method = "spearman"),
+            p_value = cor.test(AHBA_expression, t_value, method = "spearman")$p.value) %>%
+  mutate(in_16p_locus = ifelse(gene_symbol %in% sixteenP11.2_genes, "Yes", "No"))
+
+# Question from Ayan: should you be using the spin test to compute p values for these correlations?
+```
+
+
+Exporting the correlation analysis data frames to CSV files
+```{r}
+setwd(paste0(path2wd,"CSV_data_sheets"))
+write_csv(cor_results_Estimate_pearson, "AHBA_MRI_correlation_Estimate_Pearson.csv")
+write_csv(cor_results_Estimate_spearman, "AHBA_MRI_correlation_Estimate_Spearman.csv")
+write_csv(cor_results_t_value_pearson, "AHBA_MRI_correlation_t_value_Pearson.csv")
+write_csv(cor_results_t_value_spearman, "AHBA_MRI_correlation_t_value_Spearman.csv")
+```
+
+
+Now, I want to visualize the correlation data
+```{r}
+#Scatterplot showing relationship between p value and correlation, not super useful but educational for me!
+ggplot(cor_results_t_value_spearman, aes(x=p_value, y=correlation, color=in_16p_locus)) +
+  geom_point() +
+  labs(title = "Spearman correlation of t-value",
+       x = "p value",
+       y = "correlation") +
+  theme_minimal() + 
+  geom_vline(aes(xintercept = 0.05))
+
+#making a density curve instead?
+ggplot(cor_results_t_value_spearman, aes(x=correlation, color=in_16p_locus)) +
+  geom_density() +
+  labs(title = "Spearman correlation of t-value",
+       x = "Correlation Coefficient",
+       y = "Density") +
+  theme_minimal()
+
+# making a histogram instead
+ggplot(cor_results_t_value_spearman, aes(x= abs(correlation), fill=in_16p_locus)) +
+  geom_histogram(position = "identity", alpha = 0.6) +
+  labs(title = "Spearman correlation of t-value",
+       x = "Absolute Value of Correlation Coefficient",
+       y = "Frequency") +
+  theme_minimal() +
+  xlim(0, 0.6) + ylim(0, 8)
+
+ggplot(cor_results_Estimate_spearman, aes(x=abs(correlation), fill=in_16p_locus)) +
+  geom_histogram(position = "identity", alpha = 0.6) +
+  labs(title = "Spearman correlation of Estimate(~effect size)",
+       x = "Absolute Value of Correlation Coefficient",
+       y = "Frequency") +
+  theme_minimal() +
+  xlim(0, 0.6) + ylim(0, 8)
+```
+
+Now I want to plot the data
+```{r}
+library("ggpubr")
+library(plotly)
+```
+
+```{r}
+#Making a huge plot with a lot of little plots inside (facet_wrap) of all genes
+scatter_plot_estimate <- ggplot(AHBA_MRI_merged_organized, aes(x = AHBA_expression, y = Estimate)) + 
+  geom_point(size = 0.1) + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue", linewidth = 0.5) +  # Add a line of best fit (linear regression)
+  labs(title = "Scatter plots of AHBA Expression vs Estimate for all Genes",
+       x = "AHBA Expression",
+       y = "Estimate") +
+  facet_wrap(~ gene_symbol, scales = "free") +  # Separate plots for each gene
+  theme_minimal() +
+  xlim(0, 1) + ylim(-0.7, 0.7) #+
+  stat_cor(aes(label = paste(..r.label.., sep = "~`,`~")), 
+         method = "pearson", label.x = 3, label.y = 0)  # Add correlation coefficients to the plot
+
+# Convert to a plotly object
+interactive_plot_estimate <- ggplotly(scatter_plot_estimate, tooltip = c("text"))
+#interactive_plot_estimate # Display the interactive plot
+
+#Doing the same plot, but for t-value
+scatter_plot_t_value <- ggplot(AHBA_MRI_merged_organized, aes(x = AHBA_expression, y = Estimate)) +
+  geom_point(size = 0.1) + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue", linewidth = 0.5) +  # Add a line of best fit (linear regression)
+  labs(title = "Scatter plots of AHBA Expression vs Estimate for all Genes",
+       x = "AHBA Expression",
+       y = "Estimate") +
+  facet_wrap(~ gene_symbol, scales = "free") +  # Separate plots for each gene
+  theme_minimal() +
+  stat_cor(aes(label = paste(..r.label.., sep = "~`,`~")), 
+           method = "pearson", label.x = 3, label.y = 0)  # Add correlation coefficients to the plot
+
+# Convert to a plotly object
+interactive_plot_t_value <- ggplotly(scatter_plot_t_value, tooltip = c("text"))
+#interactive_plot_t_value # Display the interactive plot
+```
+
+
+Doing the above plotting for the 16p genes only
+```{r}
+AHBA_MRI_merged_organized_IN_16p_locus <- AHBA_MRI_merged_organized %>% filter(in_16p_region == "Yes")
+
+scatter_plot_16p_genes <- ggplot(AHBA_MRI_merged_organized_IN_16p_locus, aes(x = AHBA_expression, y = Estimate, color = region)) +
+  geom_point(size = 0.1) + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue", linewidth = 0.5) +  # Add a line of best fit (linear regression)
+  labs(title = "Scatter plots of AHBA Expression vs Estimate for 16p Genes",
+       x = "AHBA Expression",
+       y = "Estimate") +
+  facet_wrap(~ gene_symbol, scales = "free") +  # Separate plots for each gene
+  theme_minimal() +
+  stat_cor(aes(label = paste(..r.label.., sep = "~`,`~")), 
+           method = "pearson", label.x = 3, label.y = 0)  # Add correlation coefficients to the plot
+
+# Convert to a plotly object
+interactive_plot_16p_genes <- ggplotly(scatter_plot_16p_genes, tooltip = c("text"))
+
+# Display the interactive plot
+interactive_plot_16p_genes
+```
+
+~/Desktop/aaron_lab_2024/r_scripts/Tammy.R_16p11.2CNV_Spatial_transcriptomics_asm_feedback.Rmd
+
+Doing the above plotting for the NON-16p genes only
+```{r}
+# Doing the above plotting for the NON 16p genes ----
+AHBA_MRI_merged_organized_NOT_IN_16p_locus <- AHBA_MRI_merged_organized %>% filter(in_16p_region == "No")
+
+scatter_plot_NOT_16p_genes <- ggplot(AHBA_MRI_merged_organized_NOT_IN_16p_locus, aes(x = AHBA_expression, y = Estimate, color = region)) +
+  geom_point(size = 0.1) + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue", linewidth = 0.5, fullrange = TRUE) +  # Add a line of best fit (linear regression)
+  labs(title = "Scatter plots of AHBA Expression vs Estimate for Genes NOT in 16p locus",
+       x = "AHBA Expression",
+       y = "Estimate") +
+  facet_wrap(~ gene_symbol, scales = "free") +  # Separate plots for each gene
+  theme_minimal() +
+  stat_cor(aes(label = paste(..r.label.., sep = "~`,`~")), 
+           method = "pearson", label.x = 3, label.y = 0) + # Add correlation coefficients to the plot
+  xlim(0, 1)  # Adjust axis limits
+# Convert to a plotly object
+interactive_plot_NOT_16p_genes <- ggplotly(scatter_plot_NOT_16p_genes, tooltip = c("text"))
+
+# Display the interactive plot
+interactive_plot_NOT_16p_genes
+```
+
+
+Adding correlation coefficients and p values to plots
+1. Making new data frame with facet labels
+```{r}
+# Merge main data with correlation results
+plot_data_t_value_spearman <- AHBA_MRI_merged_organized %>%
+  left_join(cor_results_t_value_spearman, by = "gene_symbol") %>% # Merge by gene_symbol
+  # creating column with facet labels that include gene symbol, correlation coefficient, and p value
+  mutate(facet_label = paste0(gene_symbol, "\n", 
+                              "| R: ", round(correlation, 2), 
+                              ", p: ", round(p_value, 3)))
+```
+
+
+2. replotting data
+```{r}
+ggplot(plot_data_t_value_spearman, aes(x = AHBA_expression, y = t_value, color = region)) +
+  geom_point(size = 0.1) + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue", linewidth = 0.5, fullrange = TRUE) +  # Add a line of best fit (linear regression)
+  labs(title = "Scatter plots of AHBA Expression vs t-value for all Genes",
+       x = "AHBA Expression",
+       y = "t-value") +
+  facet_wrap(~ facet_label, scales = "free") +  # Use the custom facet label
+  theme_minimal() +
+  xlim(0, 1) #+ ylim(-0.7, 0.7)  # Adjust axis limits
+```
+
