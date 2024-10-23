@@ -72,11 +72,11 @@ Tidying up data frames, such that they have the same column names, in order to c
 Urresti2021_3M_organoid_tidy <- Urresti2021_3M_organoid %>%
   #remove columns that I do not need
   select(-c("Gene.Biotype", "log2.FC..DUP.vs.DEL", "P.value..DUP.vs.DEL", "FDR.adjusted.P.value..DUP.vs.DEL", "log2.FC..DUP.vs.CTL",
-            "P.value..DUP.vs.CTL", "FDR.adjusted.P.value..DUP.vs.CTL", "FDR.adjusted.P.value..DEL.vs.CTL")) %>%
+            "P.value..DUP.vs.CTL", "FDR.adjusted.P.value..DUP.vs.CTL", "P.value..DEL.vs.CTL")) %>%
   #rename columns to the standardized names I decided on
   rename("gene_name" = "HGNC.Symbol",
          "log2_fold_change" = "log2.FC..DEL.vs.CTL",
-         "p_value" = "P.value..DEL.vs.CTL",
+         "p_value" = "FDR.adjusted.P.value..DEL.vs.CTL",
          "gene_description" = "Description", 
          "ENSEMBL_ID" = "ENSEMBL.ID") %>%
   #add columns for new information I want to include
@@ -371,6 +371,9 @@ AHBA_normed_pivot <- AHBA_parcel_expression0_labeled %>%
   pivot_longer(cols = -region, names_to = "gene_symbol", values_to = "expression") %>%
   mutate(in_16p_region = ifelse(gene_symbol %in% sixteenP11.2_genes, "Yes", "No")) %>%
   unnest(cols = region)
+
+colnames(AHBA_normed_pivot)[1] <- "region"
+
 
 # Making a data frame with only the significant genes
 AHBA_normed_pivot_sigONLY <- AHBA_normed_pivot %>%
