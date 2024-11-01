@@ -1,7 +1,9 @@
 This project investigates the correlation between spatial expression of genes differentially expressed in 16p11.2 CNVs and total cranial volume of MRI data from individuals with 16p11.2 CNVs.
 
 
-NECCESARY FILES: 
+NECCESARY FILES: All are located in either the CSV_data_sheets or the output folders of this repository, except for ROIxGene_aparcaseg_INT.mat, which can be found in this figure share, in AHBAprocessed.zip:
+https://figshare.com/articles/dataset/AHBAdata/6852911
+
 
 
 Deletion
