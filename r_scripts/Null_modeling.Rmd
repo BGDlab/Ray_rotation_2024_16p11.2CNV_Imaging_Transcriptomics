@@ -1,0 +1,309 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+
+I want to get in bulk information on the 16p11.2 locus genes frmo a list I made from the TRENDS IN NEUROSICENCE 2020 publication
+
+Loading packages
+```{r}
+library(rentrez)
+
+```
+
+
+Next I need to get the entrez IDs for each gene
+
+
+```{r}
+gene_names <- c("SPN", "QPRT", "C16ORF54", "ZG16", "KIF22", "MAZ", "PRRT2", "C16ORF53", "MVP", "CDIPT", "SEZ62L", "ASPHD1", "KCTD13", "TMEM219", "TAOK2", "HIRIP3", "INO80E", "DOC2A", "C16ORF92", "FAM57B", "ALDOA", "PPP4C", "TBX6", "YPEL3", "GDPD3", "MAPK3", "CORO1A")
+summaries <- list()
+
+# Loop to gene gene summary for each gene
+for (gene in gene_names) {
+    # Search for the gene's Entrez ID
+    gene_search <- entrez_search(db="gene", term=paste0(gene, "[Gene Name] AND Homo sapiens[Organism]"))
+    
+    if (length(gene_search$ids) > 0) {
+        gene_id <- gene_search$ids[1]
+        gene_summary <- entrez_summary(db="gene", id=gene_id)
+        summaries[[gene]] <- gene_summary$summary
+    } else {
+        summaries[[gene]] <- NA  # Handle missing results
+    }
+}
+
+# Convert the list into a dataframe
+summaries_df <- data.frame(
+    gene = names(summaries),       # Column for gene names
+    summary = unlist(summaries),   # Column for summaries
+    stringsAsFactors = FALSE)       # Prevent converting strings to factors
+
+setwd("/Users/tammyray/Desktop/aaron_lab_2024/output")
+write.csv(summaries_df, "16p11.2_genes_list_with_summaries.csv")
+
+
+```
+
+
+I went to USCS genome browser and downloaded a csv of all human genes, based off refrerence from 2013
+```{r}
+setwd("/Users/tammyray/Desktop/aaron_lab_2024/CSV_data_sheets")
+all_genes <- read_csv("all_genes.csv")
+
+
+```
+
+
+Wait... I just realized that I basically have a list of neuronally-expressed genes: all the genes in the AHBA dataset should be expressed in some brain region. So, I can use that gene list to
+bootstrap my null gene list
+
+But first, I feel like I need to get some kind of uniform reading on my original gene list... like I want to get some kind of summary statistic on my correlation values.
+Let's say I want to use the spearman correlation coefficients of the t-statistic. I want to use them for _____.
+I mean, I guess I could just get the average expression for those regions... 
+
+I will 
+
+
+Loading in the MRI-AHBA data
+```{r}
+#Currently already in my environment
+AHBA_MRI_merged_organized
+```
+
+Filtering AHBA-MRI data by significance
+```{r}
+AHBA_MRI_merged_organized_SIGBRAINREGIONS <- AHBA_MRI_merged_organized %>%
+  filter(Significance == "***")
+```
+
+That leaves us with just the significantly different brain regions for duplications using model 3. Maybe I now do a correlation analysis with these genes?
+Wait, Maybe I plot the original stuff, but color by significance instead of brain region...
+
+```{r}
+ggplot(plot_data_t_value_spearman, aes(x = AHBA_expression, y = t_value, color = Significance)) +
+  geom_point(size = 0.1) + 
+  geom_smooth(method = "lm", se = FALSE, color = "blue", linewidth = 0.5, fullrange = TRUE) +  # Add a line of best fit (linear regression)
+  labs(title = "Scatter plots of AHBA Expression vs t-value for all Genes",
+       x = "AHBA Expression",
+       y = "t-value") +
+  facet_wrap(~ facet_label, scales = "free") +  # Use the custom facet label
+  theme_minimal() +
+  xlim(0, 1) #+ ylim(-0.7, 0.7)  # Adjust axis limits
+```
+
+Now that I've sorted by significance instead of brain region, maybe I can now do lines of best fit for each significance level instead of for all brain regions...
+
+```{r}
+ggplot(plot_data_t_value_spearman, aes(x = AHBA_expression, y = t_value, color = Significance)) +
+  geom_point(size = 0.1) + 
+  geom_smooth(aes(group = Significance, color = Significance), method = "lm", se = FALSE, linewidth = 0.5, fullrange = TRUE) +  # Add a line of best fit (linear regression)
+  labs(title = "Scatter plots of AHBA Expression vs t-value for all Genes",
+       x = "AHBA Expression",
+       y = "t-value") +
+  facet_wrap(~ facet_label, scales = "free") +  # Use the custom facet label
+  theme_minimal() +
+  xlim(0, 1) #+ ylim(-0.7, 0.7)  # Adjust axis limits
+```
+
+
+
+Now I am uncertain if my genes are neuronally expressed... I need to check for sure which ones are.
+
+Trying to get a list of allg enes are where theya re expressed, downloaded a tsv from the human protein atlas website
+
+```{r}
+library(tidyverse)
+```
+
+
+```{r}
+setwd("/Users/tammyray/Desktop/aaron_lab_2024/CSV_data_sheets")
+HPA_expression <- read_tsv("normal_tissue.tsv")
+```
+
+
+Getting variables
+```{r}
+tissue_type <- unique(HPA_expression$Tissue)
+tissue_type
+```
+Generating data frame for cerebral cortex expressed genes only
+
+```{r}
+regions_to_include <- c("caudate", "cerebellum", "cerebral cortex", "hippocampus", "hypothalamus", "pituitary gland", "choroid plexus", "dorsal raphe", "substantia nigra")
+
+#Creating a vector of all genes in the 16p11.2 chromosomal region. Gene list from figure 1 Rein and Yan 2020 "16p11.2 Copy Number Variations and Neurodevelopmental Disorders"
+sixteenP11.2_genes <- c("SPN", "QPRT", "C16orf54", "ZG16", "KIF22", "MAZ", "PRRT2", "C16orf53", "MVP", "CDIPT", "SEZ62L", "ASPHD1", "KCTD13", "TMEM219", "TAOK2", "HIRIP3", "INO80E", "DOC2A", "C16orf92", "FAM57B", "ALDOA", "PPP4C", "TBX6", "YPEL3", "GDPD3", "MAPK3", "CORO1A")
+
+colnames(HPA_expression)[2] <- "gene_symbol"
+
+brain_expressed_genes <- HPA_expression %>%
+  filter(Tissue %in% regions_to_include) %>%
+  filter(gene_symbol %in% sixteenP11.2_genes)
+
+```
+
+
+
+
+Generating data frame for cerebral cortex expressed genes only
+
+```{r}
+cerebral_cortex_genes <- HPA_expression %>%
+  filter(Tissue == "cerebral cortex")  %>%
+  filter(Level == "High")
+
+#Making list of genes that are highly expressed in the cerebral cortex into a dataframe, so I can more easily see and filter the data
+cerebral_cortex_genes_df <- as.data.frame(unique(cerebral_cortex_genes$gene_symbol))
+#changing column name
+colnames(cerebral_cortex_genes_list)[1] <- "gene"
+
+cerebral_cortex_genes_vector <- as.vector(unique(cerebral_cortex_genes$gene_symbol))
+
+
+```
+
+
+Randomly selecting genes from cerebral cortex gene list to 
+I do not want to replace, because 
+
+```{r}
+# Assuming your gene vector is called gene_names_vector
+sampled_genes <- sample(cerebral_cortex_genes_vector, size = 87, replace = FALSE)
+
+```
+
+
+Making a function to perform analysis with these sampled_genes vectors
+Basically, I want to input a gene list and get the mean expression of these genes, per brain region, from the normed AHBA dataframe
+Not sure if i should put everything in one function. like the sampling as well...
+
+Here's what I would need to do, for 1 gene
+```{r}
+#sampled_genes is my vector of 87 genes
+#AHBA_normed_pivot is the dataframe I will pull from
+temp_AHBA_df <- AHBA_normed_pivot %>%
+  filter(gene_symbol %in% sampled_genes) %>%
+  group_by(region) %>%
+  summarise(mean_expression = mean(expression))
+#this code returns a dataframe of the mean expression of the 87 genes in each brain region for the 34 left hemisphere cortical brain regions
+
+ggplot(temp_AHBA_df, aes(mean_expression)) + 
+  geom_histogram() + 
+  labs(title = "Mean expression of 87 genes in each brain region",
+       x = "Mean expression",
+       y = "Frequency")
+
+```
+
+FOR MY SIFNIFICANT GENE LIST FRMO LIT REVIEW/META ANALYSIS
+getting mean expression of gene group and doing correlation with Smrithi's MRI dataset
+
+Function to use
+```{r}
+#function to do spearman correlation w p value
+correlation_with_pvalue_spearman <- function(x, y) {
+  test <- cor.test(x, y, method = "spearman")
+  return(data.frame(correlation = test$estimate, p_value = test$p.value))
+}
+```
+
+Data wrangling/tidying
+```{r}
+# Defining brain region list for Smrithi's most significantly differentiated brain regions
+Smrithi_model3_del_sig_regions <- MRI_model3_leftHem_new_regionNames %>%
+  filter(Significance == "***") %>%
+  pull(region)
+
+# Adding a column to the AHBA dataframe that indicates if the brain region is significantly differentially volume in the Smrithi data
+AHBA_normed_pivot_Smrithi_region_sig <- AHBA_normed_pivot %>%
+  mutate(significance_binary = ifelse(region %in% Smrithi_model3_del_sig_regions, "***", "NS"))
+
+# Now, I want to use this data frame and plug in my sig dene list and see if any brain region is differentially expressed
+# remember, sig_gene_list is my chr vector of the 132 sigfificant genes
+sig_gene_AHBA_expression_df <- AHBA_normed_pivot_Smrithi_region_sig %>%
+  filter(gene_symbol %in% sig_gene_list) %>%
+  group_by(region) %>%
+  summarise(mean_expression = mean(expression)) %>%
+  mutate(significance_binary = ifelse(region %in% Smrithi_model3_del_sig_regions, "***", "NS"))
+```
+Initial plotting/looking at the data
+```{r}
+# Histogram
+ggplot(sig_gene_AHBA_expression_df, aes(mean_expression, fill=Significance)) + 
+  geom_histogram(position = "identity", alpha = 0.6) + 
+  labs(title = "Mean expression of 87 genes in each brain region",
+       x = "Mean expression",
+       y = "Frequency") +
+  theme_minimal()
+
+# scatterplot
+ggplot(sig_gene_AHBA_expression_df, aes(x=mean_expression, y=region, color=significance_binary)) +
+  geom_point() + 
+  labs(title = "Mean expression of 87 genes in each brain region",
+       x = "Mean expression",
+       y = "region") +
+  theme_minimal()  
+```
+#Merging the mean AHBA normed expression values of my sig gene list with Smrithi's MRI data, doing spearman's correlation with estimate and t-value
+```{r}
+#Merging the mean AHBA normed values with Smrithi's MRI data
+# sig_gene_AHBA_expression_df is the dataframe I want to use, has the mean expression of my gene group for each brain region
+#want to combine it with MRI_model3_leftHem_new_regionNames
+AHBA_mean_exp_sig_gene_list_MRI_merged <- full_join(sig_gene_AHBA_expression_df, MRI_model3_leftHem_new_regionNames, by = "region", multiple = "all") %>% select(-Genotype)
+colnames(AHBA_mean_exp_sig_gene_list_MRI_merged)[7] <- "t_value"
+# Doing spearman 
+cor_results_Estimate_spearman_mean_exp <- AHBA_mean_exp_sig_gene_list_MRI_merged %>%
+  summarize(correlation = cor(mean_expression, Estimate, method = "spearman"),
+            p_value = cor.test(mean_expression, Estimate, method = "spearman")$p.value) 
+
+cor_results_t_value_spearman_mean_exp <- AHBA_mean_exp_sig_gene_list_MRI_merged %>%
+  summarize(correlation = cor(mean_expression, t_value, method = "spearman"),
+            p_value = cor.test(mean_expression, t_value, method = "spearman")$p.value) 
+#Here I am only getting 1 output, because it's correlating the average expression gene expression per brain region with SMrithi's t values, and so it is only one thing...
+```
+Output for t-value:
+  correlation coefficient: 0.2302521
+  p-value: 0.1895185
+
+Output for estimate: 
+  correlation coefficient: 0.2103896
+  p-value: 0.2314146
+
+So, neither is significant.
+
+Are there other ways I can look at the data?
+
+
+
+```{r}
+library(pls)
+```
+
+
+
+Now, I will try to do plsr
+```{r}
+PLS_try1 <- plsr(, ncomp=2)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
